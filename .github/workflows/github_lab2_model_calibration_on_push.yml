@@ -5,6 +5,9 @@ on:
     branches:
       - main  # Trigger the workflow on pushes to the main branch
 
+permissions:
+  contents: write
+  
 jobs:
   retrain:
     runs-on: ubuntu-latest
@@ -14,9 +17,9 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: 3.9
+        python-version: 3.11
 
     - name: Install dependencies
       run: pip install -r Labs/Github_Labs/Lab2/requirements.txt
@@ -53,8 +56,8 @@ jobs:
 
     - name: Commit and Push Changes
       run: |
-        git config --global user.email "26876927+raminmohammadi@users.noreply.github.com"
-        git config --global user.name "raminmohammadi"
+        git config --global user.email "203674975+perushw@users.noreply.github.com"
+        git config --global user.name "perushw"
         metrics_filename="Labs/Github_Labs/Lab2/metrics/${timestamp}_metrics.json"
         model_filename="Labs/Github_Labs/Lab2/models/model_${timestamp}_dt_model.joblib"
         git add -f "$metrics_filename" "$model_filename"

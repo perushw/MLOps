@@ -1,8 +1,11 @@
 name: Periodic Model Calibration
 
-on: 
+on:
   schedule:
-    - cron: '0 0 * * *'  #minutes, hours, day, month, day of week 
+    - cron: '0 0 * * *'  # minutes, hours, day, month, day of week
+
+permissions:
+  contents: write
 
 jobs:
   retrain:
@@ -10,58 +13,49 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v5
       with:
-        python-version: 3.9
+        python-version: 3.11
 
     - name: Install dependencies
-      run: pip install -r requirements.txt
+      run: pip install -r Labs/Github_Labs/Lab2/requirements.txt
 
     - name: Generate and Store Timestamp
       run: |
         timestamp=$(date '+%Y%m%d%H%M%S')
         echo "$timestamp" > timestamp.txt
-      id: timestamp 
+      id: timestamp
 
-    - name: Check File Permissions
+    - name: Retrain Model on Breast Cancer in Wisconsin Dataset
       run: |
-        ls -l ./src/train_model.py
-
-    - name: Set File Permissions
-      run: |
-        chmod +x ./src/train_model.py
-
-    - name: Retrain Model
-      run: |
-        timestamp=$(cat timestamp.txt) # Use the timestamp in your training script
-        python ./src/train_model.py --timestamp "$timestamp"
+        timestamp=$(cat timestamp.txt)
+        python Labs/Github_Labs/Lab2/src/train_model.py --timestamp "$timestamp"
 
     - name: Evaluate Model and Log Metrics
       run: |
-        timestamp=$(cat timestamp.txt) # Use the timestamp in your training script
-        python ./src/evaluate_model.py  --timestamp "$timestamp" # Assuming you have a script for model evaluation
+        timestamp=$(cat timestamp.txt)
+        python Labs/Github_Labs/Lab2/src/evaluate_model.py --timestamp "$timestamp"
         metrics_filename="${timestamp}_metrics.json"
-        mv $metrics_filename $GITHUB_WORKSPACE/metrics/$metrics_filename
-      continue-on-error: false  # Continue even if evaluation fails
+        mkdir -p Labs/Github_Labs/Lab2/metrics
+        mv "$metrics_filename" "Labs/Github_Labs/Lab2/metrics/$metrics_filename"
 
     - name: Store and Version the New Model
       run: |
         timestamp=$(cat timestamp.txt)
         model_filename="model_${timestamp}_dt_model.joblib"
-        mv $model_filename $GITHUB_WORKSPACE/models/$model_filename
+        mkdir -p Labs/Github_Labs/Lab2/models
+        mv "$model_filename" "Labs/Github_Labs/Lab2/models/$model_filename"
 
     - name: Commit and Push Changes
       run: |
-        git config --global user.email "26876927+raminmohammadi@users.noreply.github.com"
-        git config --global user.name "raminmohammadi"
-        git add $GITHUB_WORKSPACE/metrics/$metrics_filename $GITHUB_WORKSPACE/models/$model_filename
+        git config --global user.email "203674975+perushw@users.noreply.github.com"
+        git config --global user.name "perushw"
+        timestamp=$(cat timestamp.txt)
+        git add "Labs/Github_Labs/Lab2/metrics/${timestamp}_metrics.json" "Labs/Github_Labs/Lab2/models/model_${timestamp}_dt_model.joblib"
         git commit -m "Add metrics and updated model"
         git push
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
-
