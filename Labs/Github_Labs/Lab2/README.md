@@ -1,3 +1,26 @@
+## My Changes from the Original Lab
+
+### Dataset
+- Replaced the synthetic `make_classification` data with the **Breast Cancer Wisconsin (Diagnostic) dataset** from scikit-learn.
+- The new dataset is fixed and reproducible. 
+
+### Training (`src/train_model.py`)
+- Added a stratified 80/20 train/test split (`random_state=42`). The original trained and evaluated on the same data, which inflated the metrics.
+- Saves the held-out test set to `data/X_test.pickle` and `data/y_test.pickle` for evaluation.
+- Updated MLflow logging: corrected the dataset name, added train and test sizes as parameters, and logs train accuracy, test accuracy, and test F1 score.
+
+### Evaluation (`src/evaluate_model.py`)
+- Evaluates the model on the saved held-out test set.
+- Added accuracy, precision, recall, and test sample count to the metrics JSON, along with F1 score.
+
+### Workflows
+- Updated all file paths to point to `Labs/Github_Labs/Lab2/`, since the workflows run from the repository root.
+- Added `permissions: contents: write` so the workflows can push the new model and metrics back to the repo.
+- Added `workflow_dispatch` to both workflows so they can be triggered manually from the Actions tab.
+- Set the commit identity to my own GitHub account instead of the original author's.
+- Fixed the periodic calibration workflow's commit step
+- Updated to `actions/checkout@v4`, `actions/setup-python@v5`, and Python 3.11.
+
 # Using GitHub Actions for Model Training and Versioning
 
 This repository demonstrates how to use GitHub Actions to automate the process of training a machine learning model, storing the model, and versioning it. This allows you to easily update and improve your model in a collaborative environment.

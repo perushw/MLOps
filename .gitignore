@@ -17,6 +17,7 @@ google-cloud-sdk/
 *.so
 *.tar.gz
 *.json
+!Labs/Github_Labs/Lab2/metrics/*.json
 *.dvc
 # Distribution / packaging
 .Python
