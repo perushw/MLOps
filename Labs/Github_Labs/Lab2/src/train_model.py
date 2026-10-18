@@ -35,6 +35,7 @@ if __name__ == '__main__':
     with open('data/y_test.pickle', 'wb') as f:
         pickle.dump(y_test, f)
 
+    # Set up MLflow experiment tracking
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
     dataset_name = "Breast Cancer in Wisconsin"
     current_time = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
