@@ -3,7 +3,9 @@ from joblib import dump
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 import argparse
 import sys
 
@@ -50,14 +52,23 @@ if __name__ == '__main__':
             "number of dimensions": X.shape[1],
             "train size": X_train.shape[0],
             "test size": X_test.shape[0],
+            "preprocessing": "StandardScaler",
+            "model": "LogisticRegression",
         }
         mlflow.log_params(params)
 
-        forest = RandomForestClassifier(random_state=0)
-        forest.fit(X_train, y_train)
+        # Preprocessing + model in one pipeline:
+        # the features range from under 1 to over 1000, so they are standardized
+        # (mean 0, standard deviation 1) before reaching the classifier.
+        # The scaler is fit on the training data only and saved together with the model.
+        model = Pipeline([
+            ("scaler", StandardScaler()),
+            ("classifier", LogisticRegression(max_iter=1000, random_state=0)),
+        ])
+        model.fit(X_train, y_train)
 
-        y_train_pred = forest.predict(X_train)
-        y_test_pred = forest.predict(X_test)
+        y_train_pred = model.predict(X_train)
+        y_test_pred = model.predict(X_test)
 
         mlflow.log_metrics({
             "Train Accuracy": accuracy_score(y_train, y_train_pred),
@@ -71,4 +82,4 @@ if __name__ == '__main__':
         # Save the model with a timestamp-based version; the workflow moves it into models/
         model_version = f'model_{timestamp}'
         model_filename = f'{model_version}_dt_model.joblib'
-        dump(forest, model_filename)
+        dump(model, model_filename)

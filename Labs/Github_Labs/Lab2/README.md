@@ -21,6 +21,32 @@
 - Fixed the periodic calibration workflow's commit step
 - Updated to `actions/checkout@v4`, `actions/setup-python@v5`, and Python 3.11.
 
+## Running the Lab Locally
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/perushw/MLOps.git
+cd MLOps/Labs/Github_Labs/Lab2
+```
+### 2. Install the dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Train and evaluate the model
+```bash
+python src/train_model.py --timestamp local
+python src/evaluate_model.py --timestamp local
+```
+
+The training script runs every experiment in `experiment_config.json`, prints each model's cross-validation score, and saves the best model. The evaluation script prints that model's metrics on the held-out test set.
+
+### 4. View the experiments in MLflow
+
+```bash
+mlflow ui --backend-store-uri ./mlruns
+```
+
 # Using GitHub Actions for Model Training and Versioning
 
 This repository demonstrates how to use GitHub Actions to automate the process of training a machine learning model, storing the model, and versioning it. This allows you to easily update and improve your model in a collaborative environment.
