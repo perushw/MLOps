@@ -1,3 +1,70 @@
+## My Changes from the Original Lab
+
+### Dataset
+- Replaced the credit card customer data (`file.csv`, clustered on `BALANCE`, `PURCHASES` and `CREDIT_LIMIT`) with the **UCI Wine dataset** (`dags/data/wine.csv`).
+- The Wine dataset has known labels (3 cultivars), so the clusters can be checked against reality. The `cultivar` column is dropped before training and only used for evaluation.
+- Replaced the single-row `test.csv` with `dags/data/wine_test.csv`: 3 held-out wines, one from each cultivar.
+- Removed the original `file.csv` and `test.csv`, since the pipeline no longer uses them.
+
+### Model (`dags/src/lab.py`)
+- Replaced K-Means + the elbow method (`kneed`) with a **Gaussian Mixture Model**, choosing `k` from 1 to 10 by the lowest **BIC**. `kneed` is no longer needed.
+- Preprocessing now standardizes all 13 features (`StandardScaler`) and reduces them to 2 principal components (`PCA`), instead of min-max scaling 3 columns.
+- Fixed model saving: the original saved the last model it fitted (`k=49`), not the one the elbow method picked. The saved model is now the lowest-BIC GMM.
+- Fixed prediction: the original predicted on raw, unscaled `test.csv` rows with a model trained on scaled data. The preprocessor and GMM are now saved together as one scikit-learn pipeline, so new rows are scaled and projected the same way as the training data.
+- Renamed `load_model_elbow` to `load_model_evaluate`. It prints the BIC for each `k`, scores the clusters against the true cultivars with the Adjusted Rand Index, and returns the cluster for every test row instead of only the first.
+- Moved the file paths into `DATA_DIR` and `MODEL_DIR` constants and removed a leftover debug print.
+
+### DAG (`dags/wine_clustering_dag.py`)
+- Renamed `airflow.py` to `wine_clustering_dag.py`. The old name hid the real `airflow` library, so running the file directly failed with `ImportError: cannot import name 'DAG' from 'airflow'`.
+- Changed the `PythonOperator` import back to `airflow.operators.python`, since `airflow.providers.standard` is not available in the Airflow 2.5.1 image used by `docker-compose.yaml`.
+- Updated the DAG description, the model filename (`wine_gmm_model.sav`), and the last task to call `load_model_evaluate`.
+- Removed the outdated XCom pickling note and trimmed the comments to the necessary ones.
+
+### Testing
+- Added `dags/src/run_pipeline.py`, a script that runs the four pipeline steps in order without Airflow.
+
+## Running the Lab Locally
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/perushw/MLOps.git
+cd MLOps/Labs/Airflow_Labs/Lab_1
+```
+
+### 2. Install the dependencies
+```bash
+pip install pandas scikit-learn
+```
+
+### 3. Run the pipeline without Airflow
+```bash
+python dags/src/run_pipeline.py
+```
+
+This runs the same four steps as the DAG. It prints the BIC for each `k`, the chosen number of clusters, the Adjusted Rand Index, and the cluster for each test wine, and saves the model to `dags/model/wine_gmm_model.sav`.
+
+### 4. Run the DAG in Airflow
+Set up `docker-compose.yaml` as described in [Airflow Setup](#airflow-setup), with `scikit-learn` added to the extra packages:
+
+```yaml
+_PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- pandas scikit-learn}
+```
+
+Then start Airflow from `Labs/Airflow_Labs/Lab_1`:
+
+```bash
+docker compose up airflow-init
+docker compose up
+```
+
+Open http://localhost:8080, log in (`airflow2` / `airflow2` by default), and trigger the `Airflow_Lab1` DAG. The `load_model_task` log shows the BIC scores, the Adjusted Rand Index and the test predictions.
+
+To run the DAG once from the terminal instead, while the containers are up:
+
+```bash
+docker compose exec airflow-scheduler python dags/wine_clustering_dag.py
+```
+
 # Airflow lab
 
 - In order to install Airflow using docker you can watch our [Airflow Lab1 Tutorial Video](https://youtu.be/exFSeGUbn4Q?feature=shared)
@@ -5,7 +72,16 @@
 
 ### ML Model
 
-This script is designed for data clustering using K-Means clustering and determining the optimal number of clusters using the elbow method. It provides functionality to load data from a CSV file, perform data preprocessing, build and save a K-Means clustering model, and determine the number of clusters based on the elbow method.
+This lab clusters wines using a **Gaussian Mixture Model (GMM)** and picks the number of clusters with the **Bayesian Information Criterion (BIC)**. This replaces the original K-Means + elbow-method setup.
+
+Unlike K-Means, which assumes round, equally sized clusters and gives each point one hard label, a GMM models every cluster as a Gaussian with its own (elliptical) covariance and gives each point a probability of belonging to each cluster. BIC is a likelihood score with a penalty for model complexity, so the best `k` is simply the one with the lowest BIC. No elbow-detection heuristic (`kneed`) is needed.
+
+#### Dataset
+
+[UCI Wine](https://archive.ics.uci.edu/dataset/109/wine) (also bundled with scikit-learn as `sklearn.datasets.load_wine`): 178 wines from three Italian cultivars, each described by 13 chemical measurements (alcohol, flavanoids, color intensity, proline, ...).
+
+- `dags/data/wine.csv`: 175 rows used for clustering. The `cultivar` column is the true label. It is **dropped before training** and used only afterwards to check the clusters.
+- `dags/data/wine_test.csv`: 3 held-out wines (one per cultivar, features only) that the trained model assigns to clusters.
 
 #### Prerequisites
 
@@ -13,56 +89,67 @@ Before using this script, make sure you have the following libraries installed:
 
 - pandas
 - scikit-learn (sklearn)
-- kneed
 - pickle
 
 #### Usage
 
-You can use this script to perform K-Means clustering on your dataset as follows:
+You can run the pipeline outside Airflow as follows (see `dags/src/run_pipeline.py`):
 
 ```python
 # Load the data
 data = load_data()
 
-# Preprocess the data
+# Preprocess the data (standardize + PCA)
 preprocessed_data = data_preprocessing(data)
 
-# Build and save the clustering model
-sse_values = build_save_model(preprocessed_data, 'clustering_model.pkl')
+# Fit GMMs for k = 1..10 and save the one with the lowest BIC
+results = build_save_model(preprocessed_data, 'wine_gmm_model.sav')
 
-# Load the saved model and determine the number of clusters
-result = load_model_elbow('clustering_model.pkl', sse_values)
+# Load the saved model, report the chosen k, evaluate and predict
+result = load_model_evaluate('wine_gmm_model.sav', results)
 print(result)
 ```
+
+Sample output:
+
+```plaintext
+Optimal no. of clusters (lowest BIC): 3
+Adjusted Rand Index vs. true cultivars: 0.894
+Test row 0: cluster 0 (probability 1.000)
+Test row 1: cluster 2 (probability 1.000)
+Test row 2: cluster 1 (probability 1.000)
+```
+
+BIC recovers the true number of cultivars (3), and the three held-out wines (one from each cultivar) land in three different clusters.
 
 #### Functions
 
 1. **load_data():**
-   - *Description:* Loads data from a CSV file, serializes it, and returns the serialized data.
+   - *Description:* Loads `wine.csv`, serializes it, and returns the serialized data.
    - *Usage:*
      ```python
      data = load_data()
      ```
 
 2. **data_preprocessing(data)**
-   - *Description:* Deserializes data, performs data preprocessing, and returns serialized clustered data.
+   - *Description:* Deserializes data, drops missing rows and the `cultivar` label, standardizes the 13 features with `StandardScaler`, and projects them onto 2 principal components with `PCA`. Returns the reduced data together with the fitted preprocessor. Reducing to 2 dimensions keeps the GMM's full covariance matrices small enough to estimate reliably from ~175 rows.
    - *Usage:*
      ```python
      preprocessed_data = data_preprocessing(data)
      ```
 
 3. **build_save_model(data, filename)**
-   - *Description:* Builds a K-Means clustering model, saves it to a file, and returns SSE values.
+   - *Description:* Fits a full-covariance `GaussianMixture` for each `k` from 1 to 10 and records each model's BIC. Saves the preprocessor and the lowest-BIC model as one scikit-learn pipeline (so it accepts raw feature rows), and returns the BIC scores and best `k`.
    - *Usage:*
      ```python
-     sse_values = build_save_model(preprocessed_data, 'clustering_model.pkl')
+     results = build_save_model(preprocessed_data, 'wine_gmm_model.sav')
      ```
 
-4. **load_model_elbow(filename, sse)**
-   - *Description:* Loads a saved K-Means clustering model and determines the number of clusters using the elbow method.
+4. **load_model_evaluate(filename, results)**
+   - *Description:* Loads the saved model and prints the BIC for each `k` and the selected number of clusters. It then scores the clusters against the true cultivars with the Adjusted Rand Index (1.0 = perfect match, 0 = random), and returns the predicted cluster for each row of `wine_test.csv`.
    - *Usage:*
      ```python
-     result = load_model_elbow('clustering_model.pkl', sse_values)
+     result = load_model_evaluate('wine_gmm_model.sav', results)
      ```
 ### Airflow Setup
 
@@ -187,7 +274,7 @@ The script defines an Airflow DAG named `your_python_dag` that consists of sever
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
 from datetime import datetime, timedelta
-from src.lab import load_data, data_preprocessing, build_save_model, load_model_elbow
+from src.lab import load_data, data_preprocessing, build_save_model, load_model_evaluate
 from airflow import configuration as conf
 ```
 The script starts by importing the required libraries and modules. Notable imports include the `DAG` and `PythonOperator` classes from the `airflow` package, datetime manipulation functions, and custom functions from the `src.lab` module.
@@ -248,23 +335,23 @@ The 'data_preprocessing_task' depends on the 'load_data_task' and calls the data
 build_save_model_task = PythonOperator(
     task_id='build_save_model_task',
     python_callable=build_save_model,
-    op_args=[data_preprocessing_task.output, "model.sav"],
+    op_args=[data_preprocessing_task.output, "wine_gmm_model.sav"],
     provide_context=True,
     dag=dag,
 )
 ```
 The 'build_save_model_task' depends on the 'data_preprocessing_task' and calls the build_save_model function. It also provides additional context information and arguments.
 
-#### Task to load a model using the 'load_model_elbow' function, depends on 'build_save_model_task'
+#### Task to load a model using the 'load_model_evaluate' function, depends on 'build_save_model_task'
 ``` python
 load_model_task = PythonOperator(
     task_id='load_model_task',
-    python_callable=load_model_elbow,
-    op_args=["model.sav", build_save_model_task.output],
+    python_callable=load_model_evaluate,
+    op_args=["wine_gmm_model.sav", build_save_model_task.output],
     dag=dag,
 )
 ```
-The 'load_model_task' depends on the 'build_save_model_task' and calls the load_model_elbow function with specific arguments.
+The 'load_model_task' depends on the 'build_save_model_task' and calls the load_model_evaluate function with specific arguments.
 
 #### Set task dependencies
 ```python
@@ -293,13 +380,15 @@ This guide provides detailed steps to set up and run an Apache Airflow Directed 
 Ensure your project has the following directory structure:
 
 ```plaintext
-your_airflow_project/
+Lab_1/
 ├── dags/
-│   ├── airflow.py     # Your DAG script
-├── src/
-│   ├── lab.py                # Data processing and modeling functions
-├── data/                       # Directory for data (if needed)
-├── docker-compose.yaml         # Docker Compose configuration
+│   ├── wine_clustering_dag.py   # DAG definition
+│   ├── src/
+│   │   ├── lab.py               # Data processing and modeling functions
+│   │   └── run_pipeline.py      # Runs the pipeline without Airflow
+│   ├── data/                    # wine.csv and wine_test.csv
+│   └── model/                   # Saved model, created by the pipeline
+├── docker-compose.yaml          # Docker Compose configuration
 ```
 
 #### Step 2: Docker Compose Configuration
