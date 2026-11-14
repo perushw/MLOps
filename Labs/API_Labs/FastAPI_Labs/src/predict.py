@@ -1,13 +1,21 @@
 import joblib
+import pandas as pd
+from data import FEATURES, MODEL_PATH
 
-def predict_data(X):
-    """
-    Predict the class labels for the input data.
-    Args:
-        X (numpy.ndarray): Input data for which predictions are to be made.
-    Returns:
-        y_pred (numpy.ndarray): Predicted class labels.
-    """
-    model = joblib.load("../model/iris_model.pkl")
-    y_pred = model.predict(X)
-    return y_pred
+
+def load_model():
+    return joblib.load(MODEL_PATH)
+
+
+def predict_data(model, rows):
+    X = pd.DataFrame(rows, columns=FEATURES)
+    classes = [str(c) for c in model.classes_]
+    results = []
+    for probs in model.predict_proba(X):
+        best = int(probs.argmax())
+        results.append({
+            "species": classes[best],
+            "confidence": float(probs[best]),
+            "probabilities": {name: float(p) for name, p in zip(classes, probs)},
+        })
+    return results

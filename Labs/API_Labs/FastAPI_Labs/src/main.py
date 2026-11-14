@@ -1,78 +1,102 @@
-from fastapi import FastAPI, status, HTTPException
-from pydantic import BaseModel
-from predict import predict_data
+from contextlib import asynccontextmanager
+from typing import Annotated, Literal
+from fastapi import Body, FastAPI, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
+from predict import load_model, predict_data
+
+ml_models = {}
 
 
-app = FastAPI()
-
-class IrisData(BaseModel):
-    """
-    Pydantic BaseModel representing iris flower measurements.
-
-    Attributes:
-        petal_length (float): The length of the iris flower's petal in centimeters.
-        sepal_length (float): The length of the iris flower's sepal in centimeters.
-        petal_width (float): The width of the iris flower's petal in centimeters.
-        sepal_width (float): The width of the iris flower's sepal in centimeters.
-    """
-    petal_length: float
-    sepal_length: float
-    petal_width: float
-    sepal_width: float
-
-class IrisResponse(BaseModel):
-    response:int
+# load the model once when the server starts instead of reading the file on every request
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        ml_models["penguin"] = load_model()
+    except FileNotFoundError:
+        print("No trained model found. Run train.py, then restart the API.")
+    yield
+    ml_models.clear()
 
 
+app = FastAPI(
+    title="Penguin Species API",
+    description="Predicts the species of a Palmer Archipelago penguin (Adelie, Chinstrap or Gentoo) from its measurements.",
+    lifespan=lifespan,
+)
 
-"""Modern web apps use a technique named routing. This helps the user remember the URLs. 
-For instance, instead of having /booking.php they see /booking/. Instead of /account.asp?id=1234/ 
-they’d see /account/1234/."""
+
+class PenguinData(BaseModel):
+    # the first example is pre-filled in the request body under "try it out" on /docs
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "island": "Torgersen",
+            "sex": "male",
+            "bill_length_mm": 39.1,
+            "bill_depth_mm": 18.7,
+            "flipper_length_mm": 181,
+            "body_mass_g": 3750,
+        }]
+    })
+
+    island: Literal["Biscoe", "Dream", "Torgersen"]
+    sex: Literal["male", "female"]
+    bill_length_mm: float = Field(gt=0, le=100, description="Bill (culmen) length in mm")
+    bill_depth_mm: float = Field(gt=0, le=40, description="Bill (culmen) depth in mm")
+    flipper_length_mm: float = Field(gt=0, le=300, description="Flipper length in mm")
+    body_mass_g: float = Field(gt=0, le=10000, description="Body mass in grams")
+
+
+class PenguinResponse(BaseModel):
+    species: str
+    confidence: float
+    probabilities: dict[str, float]
+
+
+class ModelInfo(BaseModel):
+    algorithm: str
+    classes: list[str]
+    features: list[str]
+    test_accuracy: float
+    train_rows: int
+    test_rows: int
+    trained_at: str
+    sklearn_version: str
+    feature_importances: dict[str, float]
+
+
+def get_model_bundle():
+    if "penguin" not in ml_models:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model not loaded. Run train.py, then restart the API.",
+        )
+    return ml_models["penguin"]
+
 
 @app.get("/", status_code=status.HTTP_200_OK)
 async def health_ping():
-    """Concurrent (multiple tasks can run simultaneously)"""
-    return {"status": "healthy"}
+    return {"status": "healthy", "model_loaded": "penguin" in ml_models}
 
-@app.post("/predict", response_model=IrisResponse)
-async def predict_iris(iris_features: IrisData):
-    """
-    Predict the iris flower species based on provided features.
-    This endpoint accepts iris flower measurements and returns the predicted species class.
-    Args:
-        iris_features (IrisData): An IrisData object containing:
-            - sepal_length (float): Length of the sepal in cm
-            - sepal_width (float): Width of the sepal in cm
-            - petal_length (float): Length of the petal in cm
-            - petal_width (float): Width of the petal in cm
-    Returns:
-        IrisResponse: A response object containing:
-            - response (int): The predicted iris species class (0, 1, or 2)
-    Raises:
-        HTTPException: Returns a 500 status code with error details if prediction fails.
-    Example:
-        POST /predict
-        {
-            "sepal_length": 5.1,
-            "sepal_width": 3.5,
-            "petal_length": 1.4,
-            "petal_width": 0.2
-        }
-        Response:
-        {
-            "response": 0
-        }
-    """
+
+@app.get("/model-info", response_model=ModelInfo)
+async def model_info():
+    return get_model_bundle()["info"]
+
+
+# plain def instead of async def: fastapi runs it in a thread pool, so the cpu-bound prediction does not block other requests
+@app.post("/predict", response_model=PenguinResponse)
+def predict_penguin(penguin: PenguinData):
+    model = get_model_bundle()["model"]
     try:
-        features = [[iris_features.sepal_length, iris_features.sepal_width,
-                    iris_features.petal_length, iris_features.petal_width]]
-
-        prediction = predict_data(features)
-        return IrisResponse(response=int(prediction[0]))
-    
+        return predict_data(model, [penguin.model_dump()])[0]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-    
+@app.post("/predict/batch", response_model=list[PenguinResponse])
+def predict_penguins(penguins: Annotated[list[PenguinData], Body(min_length=1, max_length=100)]):
+    model = get_model_bundle()["model"]
+    try:
+        return predict_data(model, [p.model_dump() for p in penguins])
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

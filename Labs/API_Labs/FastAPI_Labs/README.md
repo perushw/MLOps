@@ -1,3 +1,102 @@
+## My Changes from the Original Lab
+
+### Dataset
+- Replaced the Iris dataset (`sklearn.datasets.load_iris`) with the **[Palmer Penguins](https://allisonhorst.github.io/palmerpenguins/)** dataset (`data/penguins.csv`): 344 penguins of three species (Adelie, Chinstrap, Gentoo) from three islands in the Palmer Archipelago, Antarctica.
+- Each penguin has four measurements (bill length, bill depth, flipper length, body mass) and two text columns (`island`, `sex`). The API now has to validate text inputs with a fixed set of allowed values, not only floats.
+- `load_data` drops the 11 rows with missing values, leaving 333. `split_data` is now stratified, so the train and test sets keep the same share of each species.
+
+### Model (`src/train.py`)
+- Replaced the depth-3 `DecisionTreeClassifier` with a 200-tree `RandomForestClassifier`, inside a scikit-learn pipeline that one-hot encodes `island` and `sex`.
+- The original split off a test set but never used it. `train.py` now prints a per-species classification report and the test accuracy: **0.990** (99 of 100 test penguins). The original depth-3 decision tree scores 0.94 to 0.97 on the same split.
+- The saved file, `model/penguin_model.pkl`, holds the pipeline together with its details (species, test accuracy, feature importances, scikit-learn version). The API returns these details at `/model-info`.
+- Removed `model/iris_model.pkl`.
+
+### API (`src/main.py`, `src/predict.py`)
+- Replaced `IrisData` with `PenguinData`:
+  - `island` and `sex` are `Literal` types, so any other value is rejected with a 422.
+  - The measurements have `Field(gt=0, le=...)` bounds, so negative or impossible values are rejected too.
+  - An example request body is pre-filled under **Try it out** on `/docs`.
+- Replaced `IrisResponse` (`response: int`, the class number) with `PenguinResponse`: the species name, the model's confidence, and the probability of each species.
+- Added `GET /model-info` (with a `ModelInfo` response model) and `POST /predict/batch`, which accepts 1 to 100 penguins in one request.
+- The model is now loaded once when the server starts (FastAPI's `lifespan`), not from disk on every request. If no model has been trained, `/` reports `"model_loaded": false` and the model endpoints return a 503 that says to run `train.py`, instead of a 500.
+- The prediction endpoints are now plain `def` instead of `async def`. Model prediction is blocking CPU work, so inside `async def` it would stall every other request. FastAPI runs plain `def` endpoints in a thread pool instead.
+- The model and data paths are now built from the code's location instead of `../model/...`, so the scripts work from any folder, not only from `src/`.
+- Removed the docstrings and kept only the comments that explain something the code doesn't show.
+
+### Requirements (`requirements.txt`)
+- `scikit-learn==1.5.1` has no prebuilt wheels for Python 3.13 (they stop at 3.12), so on a current Python `pip install -r requirements.txt` has to compile scikit-learn from source, which needs a C compiler. Updated to `scikit-learn==1.9.1` and `pandas==3.1.0`, and replaced `fastapi[all]==0.111.1` with `fastapi[standard]==0.162.0`, the extra FastAPI now recommends (it includes uvicorn).
+- Added `pytest==9.2.0` for the tests.
+
+### Testing
+- Added `tests/test_api.py`: eight tests using FastAPI's `TestClient`. They cover the health check, model info, single and batch predictions, and four kinds of invalid input that must return 422. `pytest.ini` puts `src/` on the import path. Run `pytest` from the `FastAPI_Labs` folder.
+
+## Running the Lab Locally
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/perushw/MLOps.git
+cd MLOps/Labs/API_Labs/FastAPI_Labs
+```
+
+### 2. Create a virtual environment and install the dependencies
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+On Windows, activate it with `.venv\Scripts\activate` (PowerShell or Command Prompt) or `source .venv/Scripts/activate` (Git Bash). The repository's `.gitignore` already ignores `.venv`.
+
+### 3. Train the model
+```bash
+cd src
+python train.py
+```
+
+This prints the classification report and saves the model to `model/penguin_model.pkl`:
+
+```plaintext
+              precision    recall  f1-score   support
+
+      Adelie       0.98      1.00      0.99        44
+   Chinstrap       1.00      0.95      0.97        20
+      Gentoo       1.00      1.00      1.00        36
+
+    accuracy                           0.99       100
+
+Test accuracy: 0.990
+```
+
+### 4. Start the API
+From `src/`:
+
+```bash
+uvicorn main:app --reload
+```
+
+Open http://127.0.0.1:8000/docs to try the endpoints, or call them from a second terminal:
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"island": "Biscoe", "sex": "female", "bill_length_mm": 46.1, "bill_depth_mm": 13.2, "flipper_length_mm": 211, "body_mass_g": 4500}'
+```
+
+```json
+{"species":"Gentoo","confidence":1.0,"probabilities":{"Adelie":0.0,"Chinstrap":0.0,"Gentoo":1.0}}
+```
+
+### 5. Run the tests
+The tests don't need the server running. From the `FastAPI_Labs` folder (where `pytest.ini` is):
+
+```bash
+pytest
+```
+
+```plaintext
+8 passed
+```
+
 
 ---
 - Video Explanation: [FastAPI lab](https://www.youtube.com/watch?v=KReburHqRIQ&list=PLcS4TrUUc53LeKBIyXAaERFKBJ3dvc9GZ&index=4)
